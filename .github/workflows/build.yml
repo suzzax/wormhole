@@ -23,6 +23,9 @@ jobs:
       cancel-in-progress: true
 
     steps:
+      - name: Clear repository
+        run: |
+          rm -rf $GITHUB_WORKSPACE && mkdir $GITHUB_WORKSPACE
       - uses: actions/checkout@v2
       - name: Expand for link to Tilt dashboard (only available during build)
         run: >
@@ -65,7 +68,8 @@ jobs:
       - uses: actions/setup-node@v2
         with:
           node-version: "16"
-      - run: cd ethereum && make test
+      - run: cd ethereum && ../scripts/install-foundry
+      - run: cd ethereum && PATH=$PATH:$HOME/.foundry/bin/ make test
 
   ethereum-upgrade:
     runs-on: ubuntu-20.04
@@ -111,6 +115,9 @@ jobs:
       group: ${{ github.workflow }}-lint-${{ github.ref }}
       cancel-in-progress: true
     steps:
+      - name: Clear repository
+        run: |
+          rm -rf $GITHUB_WORKSPACE && mkdir $GITHUB_WORKSPACE
       - uses: actions/checkout@v2
       - uses: actions/setup-go@v2
         with:

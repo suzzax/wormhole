@@ -63,6 +63,7 @@ use cosmwasm_std::{
     Empty,
     Env,
     MessageInfo,
+    Order,
     QueryRequest,
     Reply,
     Response,
@@ -122,9 +123,63 @@ pub enum TransferType<A> {
     WithPayload { payload: A },
 }
 
+/// Migration code that runs the next time the contract is upgraded.
+/// This function will contain ephemeral code that we want to run once, and thus
+/// can (and should be) safely deleted after the upgrade happened successfully.
+///
+/// For example, when the code id of the wrapped assets is updated, this
+/// function will take care of upgrading all the deployed wrapped asset
+/// contracts. See [`migrate_wrapped_assets`].
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
-    Ok(Response::new())
+pub fn migrate(deps: DepsMut, env: Env, _msg: MigrateMsg) -> StdResult<Response> {
+    // On a previous deployment, the wrapped assets have been migrated to code
+    // id 767:
+    // https://finder.terra.money/classic/tx/67e8fcff48eefe11bf6a975e621b6866ba930f9d2a85bc9ac5a70f009ee354c7
+    // However, that upgrade didn't change the [`wrapped_asset_code_id`] field
+    // of the config state of this contract (the token bridge), so every wrapped
+    // asset that's been deployed since by the token bridge still uses the old
+    // code id. We thus run [`migrate_wrapped_assets`] to upgrade all the
+    // wrapped assets to 767, and the function also takes care of changing the
+    // state accordingly. Many of these assets are already running 767, for
+    // those, this will be a no-op.
+    let messages = migrate_wrapped_assets(deps, env, 767)?;
+    let count = messages.len();
+
+    // NOTE: After this migrate is done, make sure to change the migrate function to
+    // ```
+    // Ok(Response::new())
+    // ```
+    Ok(Response::new()
+        .add_messages(messages)
+        .add_attribute("migrate", "upgrade cw20 wrappers")
+        .add_attribute("count", count.to_string()))
+}
+
+/// Migrate all wrapped assets to a new code id.
+/// This function should be called in [`migrate`].
+fn migrate_wrapped_assets(deps: DepsMut, _env: Env, new_code_id: u64) -> StdResult<Vec<CosmosMsg>> {
+    let bucket = wrapped_asset_address(deps.storage);
+
+    // Produce a migrate message for each wrapped asset.
+    let mut messages = vec![];
+    for item in bucket.range(None, None, Order::Ascending) {
+        let contract_address = item?.0;
+        messages.push(CosmosMsg::Wasm(WasmMsg::Migrate {
+            contract_addr: deps
+                .api
+                .addr_humanize(&contract_address.into())?
+                .to_string(),
+            new_code_id,
+            msg: to_binary(&MigrateMsg {})?,
+        }));
+    }
+
+    // Update config so future wrapped assets will be deployed with new code id
+    let mut c = config(deps.storage).load()?;
+    c.wrapped_asset_code_id = new_code_id;
+    config(deps.storage).save(&c)?;
+
+    Ok(messages)
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -275,7 +330,7 @@ pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> S
             info,
             asset,
             recipient_chain,
-            recipient.into(),
+            recipient.to_array()?,
             fee,
             TransferType::WithoutPayload,
             nonce,
@@ -293,7 +348,7 @@ pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> S
             info,
             asset,
             recipient_chain,
-            recipient.into(),
+            recipient.to_array()?,
             fee,
             TransferType::WithPayload {
                 payload: payload.into(),
@@ -972,7 +1027,7 @@ fn handle_initiate_transfer(
     info: MessageInfo,
     asset: Asset,
     recipient_chain: u16,
-    recipient: Vec<u8>,
+    recipient: [u8; 32],
     fee: Uint128,
     transfer_type: TransferType<Vec<u8>>,
     nonce: u32,
@@ -1012,7 +1067,7 @@ fn handle_initiate_transfer_token(
     asset: HumanAddr,
     mut amount: Uint128,
     recipient_chain: u16,
-    recipient: Vec<u8>,
+    recipient: [u8; 32],
     mut fee: Uint128,
     transfer_type: TransferType<Vec<u8>>,
     nonce: u32,
@@ -1063,7 +1118,7 @@ fn handle_initiate_transfer_token(
                 token_address: asset_address.clone(),
                 amount: (0, amount.u128()),
                 recipient_chain,
-                recipient: recipient.clone(),
+                recipient: recipient.to_vec(),
                 fee: (0, fee.u128()),
             };
 
@@ -1143,7 +1198,7 @@ fn handle_initiate_transfer_token(
                 token_address: asset_address.clone(),
                 amount: (0, amount.u128()),
                 recipient_chain,
-                recipient: recipient.clone(),
+                recipient: recipient.to_vec(),
                 fee: (0, fee.u128()),
             };
 
@@ -1229,7 +1284,7 @@ fn handle_initiate_transfer_native_token(
     denom: String,
     amount: Uint128,
     recipient_chain: u16,
-    recipient: Vec<u8>,
+    recipient: [u8; 32],
     fee: Uint128,
     transfer_type: TransferType<Vec<u8>>,
     nonce: u32,
@@ -1269,7 +1324,7 @@ fn handle_initiate_transfer_native_token(
         token_address: asset_address.to_vec(),
         amount: (0, amount.u128()),
         recipient_chain,
-        recipient: recipient.clone(),
+        recipient: recipient.to_vec(),
         fee: (0, fee.u128()),
     };
 
