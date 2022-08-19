@@ -173,16 +173,9 @@ def approve_token_bridge(seed_amt: int, tmpl_sig: TmplSig, devMode: bool):
     @Subroutine(TealType.uint64)
     def getFactor(dec: Expr):
         return Cond(
-            [dec == Int(9),  Int(10)],
-            [dec == Int(10), Int(100)],
-            [dec == Int(11), Int(1000)],
-            [dec == Int(12), Int(10000)],
-            [dec == Int(13), Int(100000)],
-            [dec == Int(14), Int(1000000)],
-            [dec == Int(15), Int(10000000)],
-            [dec == Int(16), Int(100000000)],
-            [dec >  Int(16), Seq(Reject(), Int(1))],
-            [dec < Int(9), Int(1)]
+            [dec < Int(9), Int(1)],
+            [dec > Int(19), Seq(Reject(), Int(1))],
+            [Int(1), Exp(Int(10), dec - Int(8))]
         )
 
     @Subroutine(TealType.bytes)
@@ -377,9 +370,9 @@ def approve_token_bridge(seed_amt: int, tmpl_sig: TmplSig, devMode: bool):
             Symbol.store(              Extract(Txn.application_args[1], off.load() + Int(36), Int(32))),
             Name.store(                Extract(Txn.application_args[1], off.load() + Int(68), Int(32))),
 
-            # Lets trim this... seems these are limited to 7 characters
+            # Lets trim this... seems these are limited to 8 characters
             Symbol.store(trim_bytes(Symbol.load())),
-            If (Len(Symbol.load()) > Int(7), Symbol.store(Extract(Symbol.load(), Int(0), Int(7)))),
+            If (Len(Symbol.load()) > Int(8), Symbol.store(Extract(Symbol.load(), Int(0), Int(8)))),
             Name.store(Concat(trim_bytes(Name.load()), Bytes(" (Wormhole)"))),
 
             # Due to constrains on some supported chains, all token
@@ -414,7 +407,7 @@ def approve_token_bridge(seed_amt: int, tmpl_sig: TmplSig, devMode: bool):
                             TxnField.config_asset_total: Int(18446744073709551614),
                             TxnField.config_asset_decimals: Decimals.load(),
                             TxnField.config_asset_manager: me,
-                            TxnField.config_asset_reserve: me,
+                            TxnField.config_asset_reserve: Txn.accounts[3],
 
                         # We cannot freeze or clawback assets... per the spirit of 
                             TxnField.config_asset_freeze: Global.zero_address(),
@@ -759,13 +752,14 @@ def approve_token_bridge(seed_amt: int, tmpl_sig: TmplSig, devMode: bool):
             MagicAssert(And(
                 Len(Address.load()) <= Int(32),
                 Len(FromChain.load()) == Int(2),
-                Len(Txn.application_args[3]) <= Int(32)
+                Len(Txn.application_args[3]) <= Int(32),
+                Txn.application_args.length() <= Int(7)
             )),
 
             p.store(Concat(
-                If(Txn.application_args.length() == Int(6),
-                   Bytes("base16", "01"),
-                   Bytes("base16", "03")),
+                If(Txn.application_args.length() == Int(7),
+                   Bytes("base16", "03"),
+                   Bytes("base16", "01")),
                 Extract(zb.load(), Int(0), Int(24)),
                 Itob(amount.load()),  # 8 bytes
                 Extract(zb.load(), Int(0), Int(32) - Len(Address.load())),

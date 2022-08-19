@@ -117,8 +117,8 @@ const MAINNET = {
     nft_bridge: "0x04952D522Ff217f40B5Ef3cbF659EcA7b952a6c1",
   },
   algorand: {
-    core: undefined,
-    token_bridge: undefined,
+    core: "842125965",
+    token_bridge: "842126029",
     nft_bridge: undefined,
   },
   aurora: {

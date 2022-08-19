@@ -146,6 +146,7 @@ class PortalCore:
                     e = line.rstrip('\n').split("=")
                     if "INIT_SIGNERS_CSV" in e[0]:
                         self.gt.guardianKeys = e[1].split(",")
+                        print("guardianKeys=" + str(self.gt.guardianKeys))
                     if "INIT_SIGNERS_KEYS_CSV" in e[0]:
                         self.gt.guardianPrivKeys = e[1].split(",")
                         print("guardianPrivKeys=" + str(self.gt.guardianPrivKeys))
@@ -310,7 +311,7 @@ class PortalCore:
             return encode_single(type, val).hex()[64-(32):64]
         if type == 'uint256' or type == 'bytes32':
             return encode_single(type, val).hex()[64-(64):64]
-        raise Exception("you suck")
+        raise Exception("invalid type")
 
     def devnetUpgradeVAA(self):
         v = self.genUpgradePayload()
@@ -365,6 +366,7 @@ class PortalCore:
         b += self.encoder("uint16", 8)
 
         b += decode_address(approval["hash"]).hex()
+        print("core " + decode_address(approval["hash"]).hex())
 
         ret = [b]
 
@@ -387,7 +389,7 @@ class PortalCore:
         b += self.encoder("uint8", 2)  # action
         b += self.encoder("uint16", 8) # target chain
         b += decode_address(approval["hash"]).hex()
-        print(decode_address(approval["hash"]).hex())
+        print("token " + decode_address(approval["hash"]).hex())
 
         ret.append(b)
         return ret
@@ -630,7 +632,7 @@ class PortalCore:
             )
         ]
 
-        self.sendTxn(client, sender, txns, True)
+        return self.sendTxn(client, sender, txns, True)
 
     def decodeLocalState(self, client, sender, appid, addr):
         app_state = None
@@ -1260,11 +1262,15 @@ class PortalCore:
                             self.submitVAA(v, self.client, self.foundation, self.tokenid)
                         if "INIT_SIGNERS_CSV" in e[0]:
                             self.gt.guardianKeys = e[1].split(",")
+                            print("guardianKeys: " + str(self.gt.guardianKeys))
                         if "INIT_SIGNERS_KEYS_CSV" in e[0]:
                             print("bootstrapping the guardian set...")
                             self.gt.guardianPrivKeys = e[1].split(",")
+                            print("guardianPrivKeys: " + str(self.gt.guardianPrivKeys))
+
                             seq = int(random.random() * (2**31))
                             bootVAA = self.gt.genGuardianSetUpgrade(self.gt.guardianPrivKeys, self.args.guardianSet, self.args.guardianSet, seq, seq)
+                            print("dev vaa: " + bootVAA)
                             self.bootGuardians(bytes.fromhex(bootVAA), self.client, self.foundation, self.coreid)
                 seq = int(random.random() * (2**31))
                 regChain = self.gt.genRegisterChain(self.gt.guardianPrivKeys, self.args.guardianSet, seq, seq, 8, decode_address(get_application_address(self.tokenid)).hex())
@@ -1278,8 +1284,7 @@ class PortalCore:
         print("Updating the core contracts")
         approval, clear = getCoreContracts(False, self.args.core_approve, self.args.core_clear, self.client, seed_amt=self.seed_amt, tmpl_sig=self.tsig, devMode = self.devnet or self.args.testnet)
 
-#        print(decode_address(clear["hash"]).hex())
-#        sys.exit(0)
+        print("core " + decode_address(approval["hash"]).hex())
 
         txn = transaction.ApplicationUpdateTxn(
             index=self.coreid,
@@ -1300,6 +1305,9 @@ class PortalCore:
 
     def updateToken(self) -> None:
         approval, clear = get_token_bridge(False, self.args.token_approve, self.args.token_clear, self.client, seed_amt=self.seed_amt, tmpl_sig=self.tsig, devMode = self.devnet or self.args.testnet)
+
+        print("token " + decode_address(approval["hash"]).hex())
+
         print("Updating the token contracts: " + str(len(b64decode(approval["result"]))))
 
         txn = transaction.ApplicationUpdateTxn(
@@ -1328,13 +1336,13 @@ class PortalCore:
 
     def testnet(self):
         self.ALGOD_ADDRESS = self.args.algod_address = "https://testnet-api.algonode.cloud"
-        self.INDEXER_ADDRESS = self.args.algod_address = "https://testnet-idx.algonode.cloud"
+        self.INDEXER_ADDRESS = "https://testnet-idx.algonode.cloud"
         self.coreid = self.args.coreid
         self.tokenid = self.args.tokenid
 
     def mainnet(self):
         self.ALGOD_ADDRESS = self.args.algod_address = "https://mainnet-api.algonode.cloud"
-        self.INDEXER_ADDRESS = self.args.algod_address = "https://mainnet-idx.algonode.cloud"
+        self.INDEXER_ADDRESS = "https://mainnet-idx.algonode.cloud"
         self.coreid = self.args.coreid
         self.tokenid = self.args.tokenid
 
@@ -1380,7 +1388,11 @@ class PortalCore:
         parser.add_argument('--fund', action='store_true', help='Generate some accounts and fund them')
         parser.add_argument('--testnet', action='store_true', help='Connect to testnet')
         parser.add_argument('--mainnet', action='store_true', help='Connect to mainnet')
-    
+        parser.add_argument('--bootGuardian', type=str, help='Submit the supplied VAA', default="")
+        parser.add_argument('--rpc', type=str, help='RPC address', default="")
+        parser.add_argument('--guardianKeys', type=str, help='GuardianKeys', default="")
+        parser.add_argument('--guardianPrivKeys', type=str, help='guardianPrivKeys', default="")
+
         args = parser.parse_args()
         self.init(args)
 
@@ -1397,6 +1409,9 @@ class PortalCore:
         if args.mainnet:
             self.mainnet()
 
+        if args.rpc != "":
+            self.ALGOD_ADDRESS = self.args.rpc
+            
         self.client = self.getAlgodClient()
         if self.devnet or self.args.testnet:
             self.vaa_verify = self.client.compile(get_vaa_verify())
@@ -1460,14 +1475,22 @@ class PortalCore:
             print("you need at least 10 ALGO to do darn near anything...")
             sys.exit(0)
 
+        if args.guardianKeys != "":
+            self.gt.guardianKeys = eval(args.guardianKeys)
+
+        if args.guardianPrivKeys != "":
+            self.gt.guardianPrivKeyss = eval(args.guardianPrivKeys)
+
         if args.upgradeVAA:
             ret = self.devnetUpgradeVAA()
             pprint.pprint(ret)
             if (args.submit) :
                 print("submitting vaa to upgrade core")
                 self.submitVAA(bytes.fromhex(ret[0]), self.client, self.foundation, self.coreid)
+                pprint.pprint(self.read_global_state(self.client, self.foundation.addr, self.coreid))
                 print("submitting vaa to upgrade token")
                 self.submitVAA(bytes.fromhex(ret[1]), self.client, self.foundation, self.tokenid)
+                pprint.pprint(self.read_global_state(self.client, self.foundation.addr, self.tokenid))
 
         if args.boot:
             self.boot()
@@ -1484,6 +1507,12 @@ class PortalCore:
             vaa = bytes.fromhex(args.vaa)
             pprint.pprint(self.parseVAA(vaa))
             self.submitVAA(vaa, self.client, self.foundation, int(self.args.appid))
+
+        if args.bootGuardian != "":
+            vaa = bytes.fromhex(args.bootGuardian)
+            pprint.pprint(self.parseVAA(vaa))
+            response = self.bootGuardians(vaa, self.client, self.foundation, self.coreid)
+            pprint.pprint(response.__dict__)
 
 if __name__ == "__main__":
     core = PortalCore()

@@ -213,7 +213,6 @@ def getCoreContracts(   genTeal, approve_name, clear_name,
                 # What is the target of this governance message?
                 tchain.store(Extract(Txn.application_args[1], off.load() + Int(1), Int(2))),
                 # Needs to point at us or to all chains
-                MagicAssert(Or(tchain.load() == Bytes("base16", "0008"), tchain.load() == Bytes("base16", "0000"))),
 
                 a.store(Btoi(Extract(Txn.application_args[1], off.load(), Int(1)))),
                 Cond( 
@@ -222,6 +221,8 @@ def getCoreContracts(   genTeal, approve_name, clear_name,
                         # 
                         # In the case of Algorand, it contains the hash of the program that we are allowed to upgrade ourselves to.  We would then run the upgrade program itself
                         # to perform the actual upgrade
+                        MagicAssert(tchain.load() == Bytes("base16", "0008")),
+                        
                         off.store(off.load() + Int(3)),
 
                         App.globalPut(Bytes("validUpdateApproveHash"), Extract(Txn.application_args[1], off.load(), Int(32)))
@@ -230,6 +231,8 @@ def getCoreContracts(   genTeal, approve_name, clear_name,
                         # We are updating the guardian set
 
                         # This should point at all chains
+
+                        MagicAssert(Or(tchain.load() == Bytes("base16", "0008"), tchain.load() == Bytes("base16", "0000"))),
 
                         # move off to point at the NewGuardianSetIndex and grab it
                         off.store(off.load() + Int(3)),
@@ -242,7 +245,7 @@ def getCoreContracts(   genTeal, approve_name, clear_name,
                         # Make sure it is different and we can only walk forward
                         If(isBoot == Int(0), Seq(
                                 MagicAssert(Txn.accounts[3] != Txn.accounts[2]),
-                                MagicAssert(idx.load() > (set.load()))
+                                MagicAssert(idx.load() == (set.load() + Int(1)))
                         )),
 
                         # Write this away till the next time
@@ -256,13 +259,9 @@ def getCoreContracts(   genTeal, approve_name, clear_name,
                         MagicAssert(len.load() > Int(0)),  
 
                         Pop(blob.write(Int(3), Int(0), Extract(Txn.application_args[1], off.load(), Int(1) + (Int(20) * len.load())))),
-                        # Make this block expire.. as long as it is
-                        # not being used to sign itself.  We stick the
-                        # expiration 1000 bytes into the account...
-                        #
-                        # 19200 is approx 24 hours assuming a 4.5 seconds per block   (24 * 3600 / 4.5) = 19200
+
                         If(Txn.accounts[3] != Txn.accounts[2],
-                           Pop(blob.write(Int(2), Int(1000), Itob(Txn.first_valid() + Int(19200))))),
+                           Pop(blob.write(Int(2), Int(1000), Itob(Global.latest_timestamp() + Int(86400))))),
                         blob.meta(Int(3), Bytes("guardian"))
                     ])],
                     [a.load() == Int(3), Seq([
@@ -376,12 +375,14 @@ def getCoreContracts(   genTeal, approve_name, clear_name,
                 blob.checkMeta(Int(2), Bytes("guardian")),
                 # Lets grab the total keyset
                 total_guardians.store(blob.get_byte(Int(2), Int(0))),
+                MagicAssert(total_guardians.load() > Int(0)),
+
                 guardian_keys.store(blob.read(Int(2), Int(1), Int(1) + Int(20) * total_guardians.load())),
 
                 # I wonder if this is an expired guardian set
                 s.store(Btoi(blob.read(Int(2), Int(1000), Int(1008)))),
                 If(s.load() != Int(0),
-                   MagicAssert(Txn.first_valid() < s.load())),
+                   MagicAssert(Global.latest_timestamp() < s.load())),
 
                 hits.store(Bytes("base16", "0x00000000")),
 

@@ -16,6 +16,7 @@ import (
 	"github.com/certusone/wormhole/node/pkg/common"
 	"github.com/certusone/wormhole/node/pkg/db"
 	"github.com/certusone/wormhole/node/pkg/vaa"
+	"go.uber.org/zap"
 )
 
 // This is so we can have consistent config data for unit tests.
@@ -77,7 +78,13 @@ func (gov *ChainGovernor) setTokenForTesting(tokenChainID vaa.ChainID, tokenAddr
 	key := tokenKey{chain: vaa.ChainID(tokenChainID), addr: tokenAddr}
 	te := &tokenEntry{cfgPrice: bigPrice, price: bigPrice, decimals: decimals, symbol: symbol, coinGeckoId: symbol, token: key}
 	gov.tokens[key] = te
-	gov.tokensByCoinGeckoId[symbol] = te
+	cge, cgExists := gov.tokensByCoinGeckoId[te.coinGeckoId]
+	if !cgExists {
+		gov.tokensByCoinGeckoId[te.coinGeckoId] = []*tokenEntry{te}
+	} else {
+		cge = append(cge, te)
+		gov.tokensByCoinGeckoId[te.coinGeckoId] = cge
+	}
 	return nil
 }
 
@@ -211,7 +218,9 @@ func newChainGovernorForTest(ctx context.Context) (*ChainGovernor, error) {
 		return nil, fmt.Errorf("ctx is nil")
 	}
 
-	gov := NewChainGovernor(nil, nil, GoTestMode)
+	logger := zap.NewNop()
+	var db db.MockGovernorDB
+	gov := NewChainGovernor(logger, &db, GoTestMode)
 
 	err := gov.Run(ctx)
 	if err != nil {
@@ -929,4 +938,24 @@ func TestSmallerPendingTransfersAfterBigOneShouldGetReleased(t *testing.T) {
 	assert.Equal(t, uint64(488020+177461+179236), valueTrans)
 	assert.Equal(t, 2, numPending)
 	assert.Equal(t, uint64(887309+889084), valuePending)
+}
+
+func TestMainnetConfigIsValid(t *testing.T) {
+	logger := zap.NewNop()
+	var db db.MockGovernorDB
+	gov := NewChainGovernor(logger, &db, GoTestMode)
+
+	gov.env = MainNetMode
+	err := gov.initConfig()
+	require.NoError(t, err)
+}
+
+func TestTestnetConfigIsValid(t *testing.T) {
+	logger := zap.NewNop()
+	var db db.MockGovernorDB
+	gov := NewChainGovernor(logger, &db, GoTestMode)
+
+	gov.env = TestNetMode
+	err := gov.initConfig()
+	require.NoError(t, err)
 }
